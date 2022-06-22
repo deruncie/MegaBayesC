@@ -1,9 +1,3 @@
-# Copyright 2020 Daniel Runcie
-# Use of this source code is governed by the PolyForm Noncommercial License 1.0.0
-# that can be found in the LICENSE file and available at
-# https://polyformproject.org/licenses/noncommercial/1.0.0/
-
-
 #' Set MegaLMM run parameters
 #'
 #' Function to create run_parameters list for initializing MegaLMM model
@@ -50,7 +44,8 @@ MegaLMM_control = function(
                         max_NA_groups = Inf,
                         svd_K = TRUE,
                         verbose = TRUE,
-                        save_current_state = TRUE,
+                        save_current_state = TRUE,,
+                        diagonalize_ZtZ_Kinv = TRUE,
                         ...
                         ) {
   formals_named = formals()
@@ -216,8 +211,8 @@ setup_model_MegaLMM = function(Y,formula,extra_regressions=NULL,data,relmat=NULL
                             run_ID = 'MegaLMM_run'){
   # creates model matrices, RE_setup, current_state
   # returns MegaLMM_state
-
-  try(dir.create(run_ID),silent=T)
+  
+  try(dir.create(run_ID,recursive = T),silent=T)
 
   # ----------------------------- #
   # -------- observation model ---------- #
@@ -377,7 +372,7 @@ setup_model_MegaLMM = function(Y,formula,extra_regressions=NULL,data,relmat=NULL
               L = t(ldl_k$P) %*% ldl_k$L[,large_d]
             } else{
               L = as(diag(1,nrow(K)),'dgCMatrix')
-              K_inv = as(with(ldl_k,t(P) %*% crossprod(diag(1/sqrt(d)) %*% solve(L)) %*% P),'dgCMatrix')
+              K_inv = as(with(ldl_k,t(P) %*% crossprod(1/sqrt(d) * solve(L)) %*% P),'dgCMatrix')
             }
             rm(list=c('ldl_k','large_d','r_eff'))
           }
@@ -401,6 +396,16 @@ setup_model_MegaLMM = function(Y,formula,extra_regressions=NULL,data,relmat=NULL
         K = fix_K(K)
         ZL = Z %*% L
       }
+    })
+  }
+  # diagonalize RE_setup[[1]]. If this is the only one, will have RAM advantages. Otherwise, probably neutral.
+  # maybe only do if only 1 RE?
+  if(length(RE_setup) == 1 && run_parameters$diagonalize_ZtZ_Kinv) {
+    RE_setup[[1]] = within(RE_setup[[1]],{
+      S = simultaneous_diagonalize(crossprod(ZL),solve(chol(forceSymmetric(K_inv))))$S
+      ZL = ZL %*% S
+      L = L %*% S
+      K = K_inv = as(diag(1,nrow(K)),'dgCMatrix')
     })
   }
   ZL = do.call(cbind,lapply(RE_setup,function(re) re$ZL))
